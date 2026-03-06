@@ -1,13 +1,16 @@
 name: Run Scenario
 
 on:
+  workflow_dispatch:
   push:
+    branches: ['**']
     paths:
       - 'scenario.toml'
 
 jobs:
   run:
     runs-on: ubuntu-latest
+    if: github.event.repository.fork == true || github.ref != 'refs/heads/main'
     permissions:
       contents: write
       packages: read
@@ -22,10 +25,19 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install tomli
+        run: pip install tomli tomli-w pyyaml requests
 
       - name: Generate docker-compose.yml
         run: python generate_compose.py --scenario scenario.toml
+
+      - name: Pull images
+        run: |
+          if ! docker compose pull; then
+            echo ""
+            echo "Error: Failed to pull one or more images."
+            echo "Ensure all images are publicly accessible."
+            exit 1
+          fi
 
       - name: Create output directory
         run: mkdir -p output && chmod 777 output
@@ -56,7 +68,7 @@ jobs:
           password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Run assessment
-        run: docker compose up --exit-code-from agentbeats-client --abort-on-container-exit
+        run: docker compose up --timestamps --no-color --exit-code-from agentbeats-client --abort-on-container-exit
 
       - name: Generate submission metadata
         id: metadata
@@ -69,6 +81,7 @@ jobs:
 
       - name: Copy files to submission directory
         run: |
+          mkdir -p submissions results
           cp scenario.toml submissions/${{ steps.metadata.outputs.unique_name }}.toml
           cp output/results.json results/${{ steps.metadata.outputs.unique_name }}.json
 
@@ -83,9 +96,14 @@ jobs:
 
       - name: Create submission branch
         run: |
-          git remote add upstream https://github.com/${{ steps.target.outputs.repo }}.git
-          git fetch upstream
-          git checkout -b ${{ steps.metadata.outputs.branch_name }} upstream/main
+          mkdir -p /tmp/submission-files/submissions /tmp/submission-files/results
+          cp submissions/${{ steps.metadata.outputs.unique_name }}.toml /tmp/submission-files/submissions/
+          cp results/${{ steps.metadata.outputs.unique_name }}.json /tmp/submission-files/results/
+          git checkout --orphan ${{ steps.metadata.outputs.branch_name }}
+          git rm -rf . 2>/dev/null || true
+          mkdir -p submissions results
+          cp /tmp/submission-files/submissions/* submissions/
+          cp /tmp/submission-files/results/* results/
 
       - name: Commit results
         run: |
@@ -101,9 +119,9 @@ jobs:
       - name: Output PR link
         run: |
           echo "### Submit your results" >> $GITHUB_STEP_SUMMARY
-          echo "[Click here to open a pull request](https://github.com/${{ steps.target.outputs.repo }}/compare/main...${{ github.repository_owner }}:${{ steps.metadata.outputs.branch_name }}?expand=1)" >> $GITHUB_STEP_SUMMARY
+          echo "[Click here to open a pull request](https://github.com/${{ steps.target.outputs.repo }}/compare/main...${{ github.repository_owner }}:${{ github.event.repository.name }}:${{ steps.metadata.outputs.branch_name }}?expand=1)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⚠️ When creating the PR, UNCHECK 'Allow edits and access to secrets by maintainers' to protect your secrets." >> $GITHUB_STEP_SUMMARY
+          echo "WARNING: When creating the PR, UNCHECK 'Allow edits and access to secrets by maintainers' to protect your secrets." >> $GITHUB_STEP_SUMMARY
 
       - name: Cleanup
         if: always()
