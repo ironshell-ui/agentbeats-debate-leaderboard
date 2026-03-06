@@ -16,3 +16,4 @@ env = { DEEPSEEK_API_KEY = "${DEEPSEEK_API_KEY}", KIMI_API_KEY = "${KIMI_API_KEY
 [config]
 topic = "Should artificial intelligence be regulated?"
 num_rounds = 2
+
